@@ -1,0 +1,177 @@
+### Load Data Sest ###
+
+gss <- read.csv("gss00_10allcases.csv")
+
+
+### Data Cleaning - Occupation's Prestige Scale Score ###
+
+summary(gss$sei)
+skewness(gss$sei)
+kurtosis(gss$sei)
+boxplot(gss$sei)
+hist(gss$sei)
+gss_new <- gss[which(gss$sei > 0),]
+summary(gss_new$sei)
+skewness(gss_new$sei)
+kurtosis(gss_new$sei)
+
+
+### Data Cleaning - Annual Real Income ###
+
+boxplot(gss_new$realrinc)
+summary(gss_new$realrinc)
+hist(gss_new$realrinc)
+gss_new2 <- gss_new[which(gss_new$realrinc < 100000),]
+gss_new3 <- gss_new2[!(gss_new2$realrinc==0&gss_new2$wrkstat==5&gss_new2$wrkstat==6&gss_new2$wrkstat==7),]
+
+
+### Correlation Analysis ###
+
+subvariables <- c("realrinc", "sei", "age","childs","tvhours")
+gss_corr <-gss_new3[subvariables]
+cor(gss_corr)
+
+
+### Explorative Analysis - Age ###
+
+summary(gss_new3$age)
+boxplot(gss_new3$age,col = 'grey', ylab = 'Age')
+library(e1071) 
+skewness(gss_new3$age)
+kurtosis(gss_new3$age)
+hist(gss_new3$age, main = "Histogram of Age", xlab = "Age", ylab = "Frequency")
+
+
+### Explorative Analysis - Occupation's Prestige Scale Score ###
+
+summary(gss_new3$sei)
+skewness(gss_new3$sei)
+kurtosis(gss_new3$sei)
+boxplot(gss_new3$sei, main = " ",col = 'grey',ylab = "Occupation's Prestigae Scale Score")
+
+
+### Explorative Analysis - Real Annual Income ###
+
+hist(gss_new3$realrinc, xlab="Real Annual Income", ylab = 'Frequency',col = 'grey', main = "")
+summary(gss_new3$realrinc)
+skewness(gss_new3$realrinc)
+kurtosis(gss_new3$realrinc)
+
+
+### Data Cleaning - Transform Categorical Variables ###
+
+gss_new3$sex<-as.factor(gss_new3$sex)
+levels(gss_new3$sex)<-c("Male","Female")
+gss_new3$health<-as.factor(gss_new3$health)
+levels(gss_new3$health)<-c("Excellent","Good","Fair","Poor")
+gss_new3$region<-as.factor(gss_new3$region)
+levels(gss_new3$region)<-c("New England","Middle Atlantic","East North Central","West North Central","South Atlantic", "East South Central", "West South Central", "Mountain", "Pacific")
+gss_new3$degree<-as.factor(gss_new3$degree)
+levels(gss_new3$degree)<-c("Less than high school","High school","Associate/junior college","Bachelor's", "Graduate")
+
+
+### Split Data Set into Training and Test Sets ###
+
+set.seed(123) 
+sample_size = floor(0.8*nrow(gss_new3))
+picked <- sample(seq_len(nrow(gss_new3)),size = sample_size)
+training <- gss_new3[picked,]
+test <- gss_new3[-picked,]
+
+
+### Multiple Linear Regression ###
+
+library(stargazer)
+lm1 <-lm(realrinc~age+sex+health+sei+region+degree,data = training)
+summary(lm1)
+stargazer(lm1, type="html", out="lm1.htm")
+
+library(MASS)
+AIC<-stepAIC(lm1, direction="both")
+AIC$anova
+
+par(mfrow=c(1,2))
+plot(training$age, training$realrinc, xlab = "Age", ylab = "Real Annual Income")
+plot(training$sei, training$realrinc, xlab = "Occupation's Prestige Scale Score", ylab = "Real Annual Income")
+
+par(mfrow=c(2, 2))
+plot(lm1)
+
+
+### Multinomial Logistic Regression ###
+
+gss_new4<-training
+gss_new4$REALRIN3<-as.factor(gss_new4$REALRIN3)
+levels(gss_new4$REALRIN3) = c("Low", "Moderate", "High")
+library(foreign)
+library(nnet)
+training3 <- gss_new4[picked,]
+test3 <- gss_new4[-picked,]
+multi1 <- multinom(REALRIN3 ~ age+sex+health+sei+region+degree,data = training3)
+summary(multi1)
+multi1.rrr <- exp(coef(multi1))
+stargazer(multi1, type="html", coef=list(multi1.rrr),  p.auto=FALSE, out="multi1rrr.htm")
+par(mfrow=c(1, 1))
+plot(training3$realrinc, ylab = "Real Annual Income")
+
+
+### Cluster Analaysis ###
+
+library(MASS)
+library(tidyverse)  
+library(cluster)
+library(factoextra)
+
+training2<-scale(training)
+training2 <- subset(training2, select=c(age, sex, health, sei, region, degree, REALRIN3)) 
+training2 <- na.omit(training2)
+set.seed(123)
+training2 <- as.data.frame(training2)
+test2<-scale(test)
+
+fviz_nbclust(training2[,1:6], kmeans, method = "wss")
+k2 <- kmeans(training2[,1:6], centers = 3, nstart = 25)
+k2
+fviz_cluster(k2, data = training2[,1:6])
+training2<-as.data.frame(training2)
+training2$REALRIN3<-as.factor(training2$REALRIN3)
+levels(training2$REALRIN3)<-c("Low", 'Moderate',"High")
+table(k2$cluster, training2$REALRIN3)
+
+
+### Evaluation - Multiple Linear Regression ###
+
+test1<-subset(test,select=c(age, sex, health, sei, region, degree,realrinc))
+prediction<-predict(lm1, test1)
+mse <- sum((test$realrinc - prediction)^2)
+mse2<-mse/661
+
+
+### Evaluation - Multinomial Logistic Regression ###
+
+predicted_multi1 <- predict(multi1, test3, "probs")
+predicted_class <- predict (multi1, test3)
+table(predicted_class, test3$REALRIN3)
+
+predicted2_multi1 <- predict(multi1, training3, "probs")
+predicted2_class <- predict (multi1, training3)
+table(predicted2_class, training3$REALRIN3)
+
+test2 <- subset(test2, select=c(age, sex, health, sei, region, degree, REALRIN3)) 
+test2 <- na.omit(test2)
+test2 <- as.data.frame(test2)
+
+
+### Evaluation - Cluster Analysis ###
+
+install.packages("flexclust")
+library(flexclust)
+pred_k2 <- predict(k2, newdata=test2[ ,1:6 ], k=3, kccaFamily("kmeans"))
+help(cl_predict)
+predict.kMeans(k2, test2[,1:6])
+
+k3 <- kmeans(test2[,1:6], centers = 3, nstart = 25)
+k3
+test2$REALRIN3<-as.factor(test2$REALRIN3)
+levels(test2$REALRIN3)<-c("Low", 'Moderate',"High")
+table(k3$cluster, test2$REALRIN3)
